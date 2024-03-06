@@ -16,14 +16,14 @@ python -i compute_and_save_masks.py \
 python -i compute_and_save_masks.py \
   --gpu 0 \
   --filename mapillary_14716_train_images_aspect_1.33_1.txt \
-  --dataset mapillary \
+  --dataset mapillary_vistas_aspect_1.33 \
   --vit-model vit_h \
   --path-out masks_0.86_0.92_400/Mapillary_Vistas_aspect_1.33/training
 
 python -i compute_and_save_masks.py \
   --gpu 1 \
   --filename mapillary_14716_train_images_aspect_1.33_2.txt \
-  --dataset mapillary \
+  --dataset mapillary_vistas_aspect_1.33 \
   --vit-model vit_h \
   --path-out masks_0.86_0.92_400/Mapillary_Vistas_aspect_1.33/training  
 """
@@ -55,7 +55,7 @@ if __name__ == '__main__':
     args = parse_args()
     print(args)
     assert os.path.exists(args.filename)
-    assert args.dataset in ['cityscapes', 'mapillary']
+    assert args.dataset in ['cityscapes', 'mapillary_vistas_aspect_1.33']
     assert args.vit_model in ['vit_h', 'vit_l', 'vit_b']
     # because we will run this in parallel, one process per gpu
     # assert not os.path.isdir(args.path_out)

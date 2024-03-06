@@ -9,9 +9,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-def read_image(path_images, fname):
+def read_image(path_images, fname, dataset):
     fnima = os.path.join(path_images, fname)
     ima = cv2.cvtColor(cv2.imread(fnima), cv2.COLOR_BGR2RGB)
+    if dataset == 'mapillary_vistas_aspect_1.33':
+        ima = cv2.resize(ima, (1632, 1216))
     return ima
 
 
@@ -34,15 +36,15 @@ def plot_masks(masks):
     return img
 
 
-dataset = 'mapillary'
+dataset = 'mapillary_vistas_aspect_1.33'
 if dataset == 'cityscapes':
     path_masks = 'masks_0.86_0.92_400/cityscapes/train'
     path_images = './data/cityscapes/leftImg8bit/train'
     fnima = 'bremen/bremen_000083_000019_leftImg8bit.png'
     fnmasks = 'bremen/bremen_000083_000019_masks.npz'
-elif dataset == 'mapillary':
-    path_masks = './mapillary'
-    path_images = './data/Mapillary_Vistas_aspect_1.33/training/images'
+elif dataset == 'mapillary_vistas_aspect_1.33':
+    path_masks = './masks_0.86_0.92_400/mapillary_vistas_aspect_1.33/training'
+    path_images = './data/mapillary_vistas_aspect_1.33/training/images'
     fn = '3-ZizFQ1WDvxfgAUkDvcWw'
     # 'z1qtUAgkrLR-3dGGw6MFdg' # 77 masks
     # 'eTlwMXy2gFxMYjDhWV78sQ' # 81 masks
@@ -56,7 +58,7 @@ elif dataset == 'mapillary':
 else:
     assert False
 
-ima = read_image(path_images, fnima)
+ima = read_image(path_images, fnima, dataset)
 masks = read_masks(path_masks, fnmasks)
 ima_masks = plot_masks(masks)
 
