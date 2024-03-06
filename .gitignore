@@ -1,0 +1,5 @@
+/masks_0.86_0.92_400/
+/*.pth
+/data
+/cityscapes_masks_0.86_0.92_400.zip
+/all_masks_cityscapes_train_0.86_0.92_400_1000.pkl

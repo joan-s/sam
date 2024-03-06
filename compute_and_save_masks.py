@@ -18,14 +18,14 @@ python -i compute_and_save_masks.py \
   --filename mapillary_14716_train_images_aspect_1.33_1.txt \
   --dataset mapillary \
   --vit-model vit_h \
-  --path-out mapillary
+  --path-out masks_0.86_0.92_400/Mapillary_Vistas_aspect_1.33/training
 
 python -i compute_and_save_masks.py \
   --gpu 1 \
   --filename mapillary_14716_train_images_aspect_1.33_2.txt \
   --dataset mapillary \
   --vit-model vit_h \
-  --path-out mapillary    
+  --path-out masks_0.86_0.92_400/Mapillary_Vistas_aspect_1.33/training  
 """
 
 def parse_args():
@@ -96,9 +96,10 @@ if __name__ == '__main__':
         if args.dataset == 'cityscapes':
             fname_mask = fn.split('/')[-1].replace('leftImg8bit', 'masks').replace('.png', '.npz')
             # to be read like
-            # masks = np.load(fname_ima.replace('leftImg8bit', 'masks').replace('.png', '_masks.npz'), allow_pickle=True)['masks_0.86_0.92_400']
+            # masks = np.load(fname_ima.replace('leftImg8bit', 'masks').replace('.png', '_masks.npz'),
+            #                 allow_pickle=True)['masks_0.86_0.92_400']
         elif args.dataset == 'mapillary':
-            image = cv2.resize(image, (1600, 1200))
+            image = cv2.resize(image, (1632, 1216))
             fname_mask = fn.split('/')[-1].replace('.jpg', '.npz')
         else:
             assert False

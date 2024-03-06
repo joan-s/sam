@@ -34,15 +34,27 @@ def plot_masks(masks):
     return img
 
 
-path_masks = 'masks_0.86_0.92_400/cityscapes/train'
-path_images = './data/cityscapes/leftImg8bit/train'
-fnima = 'bremen/bremen_000083_000019_leftImg8bit.png'
-fnmasks = 'bremen/bremen_000083_000019_masks.npz'
-
-path_masks = './mapillary'
-path_images = './data/Mapillary_Vistas_aspect_1.33/training/images'
-fnima = 'z1uGUfJJePu5QSFIBuXZGQ.jpg' # '028jmhAnOFJO1wYDQW9x7Q.jpg' # '014cEvKoAuTJgL6yJvmZow.jpg' # '0035fkbjWljhaftpVM37-g.jpg'
-fnmasks = 'z1uGUfJJePu5QSFIBuXZGQ.npz' # '028jmhAnOFJO1wYDQW9x7Q.npz' # '014cEvKoAuTJgL6yJvmZow.npz' # '0035fkbjWljhaftpVM37-g.npz'
+dataset = 'mapillary'
+if dataset == 'cityscapes':
+    path_masks = 'masks_0.86_0.92_400/cityscapes/train'
+    path_images = './data/cityscapes/leftImg8bit/train'
+    fnima = 'bremen/bremen_000083_000019_leftImg8bit.png'
+    fnmasks = 'bremen/bremen_000083_000019_masks.npz'
+elif dataset == 'mapillary':
+    path_masks = './mapillary'
+    path_images = './data/Mapillary_Vistas_aspect_1.33/training/images'
+    fn = '3-ZizFQ1WDvxfgAUkDvcWw'
+    # 'z1qtUAgkrLR-3dGGw6MFdg' # 77 masks
+    # 'eTlwMXy2gFxMYjDhWV78sQ' # 81 masks
+    # 'W4SbbddXg1x2v23VArJLsg' # 99 masks
+    #'XLgr6WNotcTekdHcJgtalw' # 452 masks finestres
+    # 'gC_OOs5KJuwixb8hQp823w' # 560 masks finestres i llambordes
+    # 'IGFIBamIlRmNq2HlhrXXEQ' # 444 masks
+    # '3-ZizFQ1WDvxfgAUkDvcWw' 'z1uGUfJJePu5QSFIBuXZGQ' '028jmhAnOFJO1wYDQW9x7Q' '014cEvKoAuTJgL6yJvmZow' '0035fkbjWljhaftpVM37-g'
+    fnima = fn + '.jpg'
+    fnmasks = fn + '.npz'
+else:
+    assert False
 
 ima = read_image(path_images, fnima)
 masks = read_masks(path_masks, fnmasks)
@@ -52,9 +64,9 @@ plt.figure()
 plt.subplot(2,1,1)
 plt.imshow(ima)
 plt.axis('off')
+plt.title('{}, {} masks'.format(fnima, len(masks)))
 plt.subplot(2,1,2)
 plt.imshow(ima_masks)
 plt.axis('off')
-plt.title(fnima)
 plt.show(block=False)
 
