@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 from skimage.segmentation import mark_boundaries
 from matplotlib.backend_bases import MouseButton
 from itertools import groupby
+from tqdm import tqdm
 import argparse
 
 """
@@ -132,79 +133,98 @@ bicycle : 20 masks, 3.9320826172828673 s./mask
 12 errors out of 380 annotations, accuracy 96.8 %
 """
 
-def parse_args():
-    parser = argparse.ArgumentParser(description='Computes average time to annotate a mask and the accuracy of '
-                                     'the annotations wrt to the majority label of the region pixels, a.k.a '
-                                     'region groundtruth. Only for Cityscapes train dataset. This average time serves '
-                                     'to translate % budget to number of regions annotated')
-    parser.add_argument('--num-masks-to-annotate', type=int, default=0,
-                        help='Total masks to annotate, being the masks sampled from the pool of all masks, thus '
-                             'following its class distribution.')
-    parser.add_argument('--num-masks-to-annotate-per-class', type=int, default=0,
-                        help='This number of masks is sampled among the masks of each class.')
-    parser.add_argument('--path-images', default='/home/joans/Programs/mmsegmentation/data/cityscapes/leftImg8bit/train',
-                        help='directory of the color images of Cityscapes train')
-    parser.add_argument('--path-masks', default='masks_0.86_0.92_400/cityscapes/train',
-                        help='directory of the npz files with all the masks of each frame of Cityscapes train')
-    parser.add_argument('--fname-all-masks', default='all_masks_cityscapes_train_0.86_0.92_400_1000.pkl',
-                        help='pkl file with the data of each mask of each image (but the binary map itself '
-                             'which are in the .npz files')
-    args = parser.parse_args()
-    assert (args.num_masks_to_annotate > 0) ^ (args.num_masks_to_annotate_per_class > 0), \
-        'pass either --num-masks-to-annotate or --num-masks-to-annotate-per-class'
-    return args
 
-def read_image(path_images, fname):
-    fnima = os.path.join(path_images, fname + '_leftImg8bit.png')
+def read_image(fname):
+    fnima = os.path.join(fname)
     ima = cv2.cvtColor(cv2.imread(fnima), cv2.COLOR_BGR2RGB)
+    if args.dataset == 'mapillary_vistas_aspect_1.33_train':
+        ima = cv2.resize(ima, (1632, 1216))
     return ima
 
-def read_masks(path_masks, fname):
-    fnmasks = os.path.join(path_masks, fname + '_masks.npz')
-    return np.load(fnmasks, allow_pickle=True)['masks']
 
-class Bbox:
-    def __init__(self, upper_left_x, upper_left_y, lower_right_x, lower_right_y):
-        self.upper_left_x = upper_left_x
-        self.upper_left_y = upper_left_y
-        self.lower_right_x = lower_right_x
-        self.lower_right_y = lower_right_y
+def read_gt(fname):
+    gt = cv2.imread(fname, cv2.IMREAD_GRAYSCALE)
+    if args.dataset == 'mapillary_vistas_aspect_1.33_train':
+        gt = cv2.resize(gt, (1632, 1216), interpolation=cv2.INTER_NEAREST)
+    return gt
 
-    def contains(self, x, y):
-        return (x >= self.upper_left_x ) \
-               and (x <= self.lower_right_x) \
-               and (y >= self.upper_left_y) \
-               and (y <= self.lower_right_y)
+
+def read_masks(fname):
+    return np.load(fname, allow_pickle=True)['masks']
+
+
+
+def ignore_label():
+    if args.dataset == 'cityscapes_train':
+        return 255
+    if args.dataset == 'mapillary_vistas_aspect_1.33_train':
+        return 19
+    return
+
+def make_filenames():
+    if args.dataset == 'cityscapes_train':
+        filenames = 'cityscapes_train.txt'
+        path_dataset = '../data/cityscapes'
+        path_images = os.path.join(path_dataset, 'leftImg8bit', 'train')
+        path_labels = os.path.join(path_dataset, 'gtFine', 'train')
+        path_masks = '../masks_0.86_0.92_400/cityscapes/train'
+
+    if args.dataset == 'mapillary_vistas_aspect_1.33_train':
+        filenames = 'mapillary_vistas_aspect_1.33_train.txt'
+        path_dataset = '../data/mapillary_vistas_aspect_1.33'
+        path_images = os.path.join(path_dataset, 'training', 'images')
+        path_labels = os.path.join(path_dataset, 'training', 'labels')
+        path_masks = '../masks_0.86_0.92_400/mapillary_vistas_aspect_1.33/training'
+
+    with open(filenames, 'r') as f:
+        base_fnames = f.read().splitlines()
+
+    base_fnames.sort()
+    fnames_images = []
+    fnames_groundtruth = []
+    fnames_masks = []
+    for fn in base_fnames:
+        if args.dataset == 'cityscapes_train':
+            fn_ima = os.path.join(path_images, fn + '_leftImg8bit.png')
+            fn_gt = os.path.join(path_labels, fn + '_gtFine_labelTrainIds.png')
+            fn_masks = os.path.join(path_masks, fn + '_masks.npz')
+
+        if args.dataset == 'mapillary_vistas_aspect_1.33_train':
+            fn_ima = os.path.join(path_images, fn + '.jpg')
+            fn_gt = os.path.join(path_labels, fn + '.png')
+            fn_masks = os.path.join(path_masks, fn + '.npz')
+
+        for fn in [fn_ima, fn_gt, fn_masks]:
+            assert os.path.isfile(fn), '{} does not exists'.format(fn)
+
+        fnames_images.append(fn_ima)
+        fnames_groundtruth.append(fn_gt)
+        fnames_masks.append(fn_masks)
+
+    return fnames_images, fnames_groundtruth, fnames_masks
+
+
 
 def selected_class(x, y):
-    bboxes_classes_in_legend = {
-        0: Bbox(213, 1034, 410, 1074), # upper left x y, lower right x y
-        1: Bbox(416, 1033, 614, 1074),
-        2: Bbox(622, 1034, 816, 1077),
-        3: Bbox(826, 1034, 1020, 1075),
-        4: Bbox(1029, 1033, 1224, 1075),
-        5: Bbox(1232, 1031, 1428, 1077),
-        6: Bbox(1439, 1033, 1633, 1075),
-        7: Bbox(1642, 1034, 1834, 1074),
-        8: Bbox(1845, 1034, 2038, 1074),
-        9: Bbox(10, 1084, 204, 1125),
-        10: Bbox(215, 1084, 408, 1127),
-        11: Bbox(418, 1083, 613, 1127),
-        12: Bbox(622, 1084, 817, 1125),
-        13: Bbox(826, 1084, 1021, 1128),
-        14: Bbox(1029, 1084, 1226, 1128),
-        15: Bbox(1233, 1084, 1430, 1127),
-        16: Bbox(1436, 1086, 1633, 1128),
-        17: Bbox(1640, 1084, 1836, 1125),
-        18: Bbox(1844, 1083, 2040, 1127)
-    }
-    num_classes = len(bboxes_classes_in_legend)
-    for c in range(num_classes):
-        bbox = bboxes_classes_in_legend[c]
-        if bbox.contains(x,y):
-            # print(x, y, c, dict_classes[c])
-            return c
-    return None
+    if args.dataset == 'cityscapes_train':
+        f = 1
+        first_row_legend = 1024
+    if args.dataset == 'mapillary_vistas_aspect_1.33_train':
+        f = 1632 / 2048
+        first_row_legend = 1216
+
+    cols_per_class = 205 * f
+    rows_per_class = 56 * f
+    num_classes_per_row = 10
+    c = int(-1 + x // cols_per_class + num_classes_per_row * ((y - first_row_legend) // rows_per_class))
+    # assumption: the legend is at the bottom of the image and has its same width
+    # -1 + because first class in legend is void
+    if y > first_row_legend:
+        print(x, y, c, dict_classes[c])
+        return c
+    else:
+        return None
+
 
 def on_click(event):
     global last_event
@@ -220,18 +240,90 @@ def group_masks_by_label(masks):
     return grouped_masks
 
 
+def make_all_masks():
+    fnames_images, fnames_groundtruth, fnames_masks = make_filenames()
+    # fnames_images = fnames_images[:10]
+    # fnames_groundtruth = fnames_groundtruth[:10]
+    # fnames_masks = fnames_masks[:10]
+
+    num_images = len(fnames_images)
+    all_masks = []
+    for i in tqdm(range(num_images)):
+        fn_ima = fnames_images[i]
+        fn_gt = fnames_groundtruth[i]
+        fn_masks = fnames_masks[i]
+        for fn in [fn_ima, fn_gt, fn_masks]:
+            assert os.path.exists(fn)
+
+        gt = read_gt(fn_gt)
+        masks = read_masks(fn_masks)
+        num_masks_ima = len(masks)
+        for nmi in range(num_masks_ima):
+            area = masks[nmi]['area']  # or np.sum(seg)
+            if area > min_area:
+                seg = masks[nmi]['segmentation']
+                counts_gt = np.bincount(gt[seg], minlength=num_classes)
+                majority_label_gt = np.argmax(counts_gt)
+                if majority_label_gt != ignore_label():
+                    # this is to discard the void regions in the groundtruth like the own car motor cover, that is,
+                    # regions where ignore_label is the most frequent groundtruth label (but not necessarily the only one).
+                    new_mask = {
+                        'fname_ima': fn_ima,
+                        'fname_masks': fn_masks,
+                        'nmask_in_image': nmi,
+                        'label': majority_label_gt,
+                        'bbox': masks[nmi]['bbox'],
+                    }
+                    all_masks.append(new_mask)
+    return all_masks
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description='Computes average time to annotate a mask and the accuracy of '
+                                     'the annotations wrt to the majority label of the region pixels, a.k.a '
+                                     'region groundtruth. Only for Cityscapes train dataset. This average time serves '
+                                     'to translate % budget to number of regions annotated')
+    parser.add_argument('--dataset', required=True)
+    parser.add_argument('--num-masks-to-annotate', type=int, default=0,
+                        help='Total masks to annotate, being the masks sampled from the pool of all masks, thus '
+                             'following its class distribution.')
+    parser.add_argument('--num-masks-to-annotate-per-class', type=int, default=0,
+                        help='This number of masks is sampled among the masks of each class.')
+
+    args = parser.parse_args()
+    assert args.dataset in ['cityscapes_train', 'mapillary_vistas_aspect_1.33_train']
+    assert (args.num_masks_to_annotate > 0) ^ (args.num_masks_to_annotate_per_class > 0), \
+        'pass either --num-masks-to-annotate or --num-masks-to-annotate-per-class'
+    return args
+
+
+def get_legend():
+    legend = plt.imread('cityscapes_legend.png')
+    if args.dataset == 'cityscapes_train':
+        return legend
+
+    if args.dataset == 'mapillary_vistas_aspect_1.33_train':
+        f = 1632 / 2048
+        return cv2.resize(legend, (int(f * legend.shape[1]), int(f * legend.shape[0])))
+
 if __name__ == '__main__':
     args = parse_args()
-    legend = plt.imread('cityscapes_legend.png')
+
     dict_classes = {0: 'road', 1: 'sidewalk', 2: 'building', 3: 'wall', 4: 'fence', 5: 'pole',
                     6: 'traffic light', 7: 'traffic sign', 8: 'vegetation', 9: 'terrain',
                     10: 'sky', 11: 'person', 12: 'rider', 13: 'car', 14: 'truck', 15: 'bus', 16: 'train',
                     17: 'motorcycle', 18: 'bicycle'}
     num_classes = len(dict_classes)
-    last_event = None
+    min_area = 1000
 
-    with open(args.fname_all_masks, 'rb') as f:
-        all_masks = pickle.load(f)
+    fname_all_masks = 'all_masks_{}.pkl'.format(args.dataset)
+    if not os.path.exists(fname_all_masks):
+        all_masks = make_all_masks()
+        with open(fname_all_masks, 'wb') as f:
+            pickle.dump(all_masks, f)
+    else:
+        with open(fname_all_masks, 'rb') as f:
+            all_masks = pickle.load(f)
 
     if args.num_masks_to_annotate > 0:
         # select masks randomly, thus respecting the prob distribution of the classes
@@ -242,7 +334,7 @@ if __name__ == '__main__':
         dict_masks = group_masks_by_label(all_masks)
         for c in range(num_classes):
             masks_to_annotate_per_class[c] = np.random.choice(dict_masks[c], args.num_masks_to_annotate_per_class, replace=False)
-            # print('found {} masks of class {}'.format(len(masks_to_annotate_per_class[c]), dict_classes[c]))
+            print('found {} masks of class {}'.format(len(masks_to_annotate_per_class[c]), dict_classes[c]))
 
         # put all the masks in dictionary into a single list and shuffle
         masks_to_annotate = np.random.permutation([m for masks_of_a_class in masks_to_annotate_per_class.values()
@@ -250,19 +342,25 @@ if __name__ == '__main__':
     else:
         assert False
 
+    last_event = None
     region_labels = []
     annotation_labels = []
     annotation_times = []
+    legend = get_legend()
     fig = plt.figure()
     for mask in masks_to_annotate:
-        fname = mask['fname']
+        fname_ima = mask['fname_ima']
+        fname_masks = mask['fname_masks']
         idx_mask = mask['nmask_in_image']
-        masks_image = read_masks(args.path_masks, mask['fname'])
+        masks_image = read_masks(mask['fname_masks'])
         seg = masks_image[idx_mask]['segmentation']
+        x0, y0, width, height = mask['bbox']
+        x1 = x0 + width
+        y1 = y0 + height
         cvert = np.argmax(np.sum(seg, axis=0))
         chorz = np.argmax(np.sum(seg, axis=1))
-        ima = read_image(args.path_images, fname)
-        ima_with_boundary = mark_boundaries(ima, seg, color=(1, 0, 0), mode='thick')
+        ima = read_image(fname_ima)
+        ima_with_boundary = mark_boundaries(ima, seg, color=(1,1,0), mode='thick')
         ima_to_show = np.vstack([ima_with_boundary, legend])
         region_label = mask['label']
         region_labels.append(region_label)
@@ -273,9 +371,12 @@ if __name__ == '__main__':
         class_name = dict_classes[region_label]
         plt.text(20, 20, class_name, color='white')
         plt.text(20, 60, class_name, color='black')
-        plt.plot([cvert, cvert], [0, 1023], 'r:')
-        plt.plot([0, 2047], [chorz, chorz], 'r:')
+        plt.plot([cvert, cvert], [0, y0], 'y:') # 1023
+        plt.plot([cvert, cvert], [y1, ima.shape[0]], 'y:')
+        plt.plot([0, x0], [chorz, chorz], 'y:') # 2047
+        plt.plot([x1, ima.shape[1]], [chorz, chorz], 'y:')
         plt.connect('button_press_event', on_click)
+        plt.axis('off')
         plt.show(block=False)
         t1 = time()
         plt.waitforbuttonpress()
@@ -314,3 +415,4 @@ if __name__ == '__main__':
     num_errors = np.sum(annotation_labels != region_labels)
     print('{} errors out of {} annotations, accuracy {} %'.format(num_errors, len(masks_to_annotate),
           np.round(100 * (1. - num_errors / len(masks_to_annotate)), decimals=1)))
+
