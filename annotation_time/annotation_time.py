@@ -9,6 +9,9 @@ from matplotlib.backend_bases import MouseButton
 from itertools import groupby
 from tqdm import tqdm
 import argparse
+from metric import ConfusionMatrix
+from multiprocessing import cpu_count
+from multiprocessing.pool import Pool
 
 """
 (sam) joans@cvc178:~/Programs/sam$ python  annotation_time.py --num-masks-to-annotate-per-class 20 
@@ -154,7 +157,7 @@ def read_masks(fname):
 
 
 
-def ignore_label():
+def get_ignore_label():
     if args.dataset == 'cityscapes_train':
         return 255
     if args.dataset == 'mapillary_vistas_aspect_1.33_train':
@@ -240,41 +243,68 @@ def group_masks_by_label(masks):
     return grouped_masks
 
 
-def make_all_masks():
+def make_masks_one_image(fn_ima, fn_gt, fn_masks, ignore_label):
+    for fn in [fn_ima, fn_gt, fn_masks]:
+        assert os.path.exists(fn)
+
+    gt = read_gt(fn_gt)
+    masks = read_masks(fn_masks)
+    num_masks_ima = len(masks)
+    masks_one_image = []
+    for nmi in range(num_masks_ima):
+        area = masks[nmi]['area']  # or np.sum(seg)
+        if area > min_area:
+            seg = masks[nmi]['segmentation']
+            counts_gt = np.bincount(gt[seg], minlength=args.num_classes)
+            majority_label_gt = np.argmax(counts_gt)
+            if majority_label_gt != ignore_label:
+                # this is to discard the void regions in the groundtruth like the own car motor cover, that is,
+                # regions where ignore_label is the most frequent groundtruth label (but not necessarily the only one).
+                gt_seg = gt[seg]
+                idx = gt_seg != ignore_label
+                npixels = idx.sum()
+                confusion_matrix = ConfusionMatrix(args.num_classes)
+                confusion_matrix.add((majority_label_gt * np.ones(npixels)).astype(dtype=np.int64), gt_seg[idx].astype(np.int64))
+                # print('counts_gt', counts_gt)
+                # print('unique gt_seg[idx]', np.unique(gt_seg[idx]))
+                # print('majority gt label', majority_label_gt)
+                # print('cm', confusion_matrix.value())
+                # print()
+                new_mask = {
+                    'fname_ima': fn_ima,
+                    'fname_masks': fn_masks,
+                    'nmask_in_image': nmi,
+                    'label': majority_label_gt,
+                    'confusion_matrix': confusion_matrix.value()[:, majority_label_gt],
+                    # this is the only non-zero column, because rows = groundtruth, cols = predictions
+                    # = the majority label for all pixels in the mask
+                    'bbox': masks[nmi]['bbox'],
+                }
+                masks_one_image.append(new_mask)
+
+    print('.', end='', flush=True)
+    return masks_one_image
+
+
+def make_all_masks(debug=False):
+    print('making all_masks parallel...')
     fnames_images, fnames_groundtruth, fnames_masks = make_filenames()
-    # fnames_images = fnames_images[:10]
-    # fnames_groundtruth = fnames_groundtruth[:10]
-    # fnames_masks = fnames_masks[:10]
+    if debug:
+        fnames_images = fnames_images[:100]
+        fnames_groundtruth = fnames_groundtruth[:100]
+        fnames_masks = fnames_masks[:100]
 
+    ignore_label = get_ignore_label()
     num_images = len(fnames_images)
-    all_masks = []
-    for i in tqdm(range(num_images)):
-        fn_ima = fnames_images[i]
-        fn_gt = fnames_groundtruth[i]
-        fn_masks = fnames_masks[i]
-        for fn in [fn_ima, fn_gt, fn_masks]:
-            assert os.path.exists(fn)
-
-        gt = read_gt(fn_gt)
-        masks = read_masks(fn_masks)
-        num_masks_ima = len(masks)
-        for nmi in range(num_masks_ima):
-            area = masks[nmi]['area']  # or np.sum(seg)
-            if area > min_area:
-                seg = masks[nmi]['segmentation']
-                counts_gt = np.bincount(gt[seg], minlength=num_classes)
-                majority_label_gt = np.argmax(counts_gt)
-                if majority_label_gt != ignore_label():
-                    # this is to discard the void regions in the groundtruth like the own car motor cover, that is,
-                    # regions where ignore_label is the most frequent groundtruth label (but not necessarily the only one).
-                    new_mask = {
-                        'fname_ima': fn_ima,
-                        'fname_masks': fn_masks,
-                        'nmask_in_image': nmi,
-                        'label': majority_label_gt,
-                        'bbox': masks[nmi]['bbox'],
-                    }
-                    all_masks.append(new_mask)
+    num_cores = cpu_count()
+    print('{} cores'.format(num_cores))
+    with Pool(processes=num_cores) as pool:
+        all_masks = pool.starmap(make_masks_one_image,
+                                 [(fnames_images[i], fnames_groundtruth[i], fnames_masks[i], ignore_label)
+                                  for i in range(num_images)])
+    # flatten
+    all_masks = [mask for masks_one_image in all_masks for mask in masks_one_image]
+    print('done')
     return all_masks
 
 
@@ -306,6 +336,7 @@ def get_legend():
         f = 1632 / 2048
         return cv2.resize(legend, (int(f * legend.shape[1]), int(f * legend.shape[0])))
 
+
 if __name__ == '__main__':
     args = parse_args()
 
@@ -313,7 +344,7 @@ if __name__ == '__main__':
                     6: 'traffic light', 7: 'traffic sign', 8: 'vegetation', 9: 'terrain',
                     10: 'sky', 11: 'person', 12: 'rider', 13: 'car', 14: 'truck', 15: 'bus', 16: 'train',
                     17: 'motorcycle', 18: 'bicycle'}
-    num_classes = len(dict_classes)
+    args.num_classes = len(dict_classes)
     min_area = 1000
 
     fname_all_masks = 'all_masks_{}.pkl'.format(args.dataset)
@@ -332,7 +363,7 @@ if __name__ == '__main__':
         # select same number of masks per class and the shuffle
         masks_to_annotate_per_class = {}
         dict_masks = group_masks_by_label(all_masks)
-        for c in range(num_classes):
+        for c in range(args.num_classes):
             masks_to_annotate_per_class[c] = np.random.choice(dict_masks[c], args.num_masks_to_annotate_per_class, replace=False)
             print('found {} masks of class {}'.format(len(masks_to_annotate_per_class[c]), dict_classes[c]))
 
@@ -401,8 +432,8 @@ if __name__ == '__main__':
     print('average time per mask {}'.format(total_time/len(masks_to_annotate)))
 
     print('average time per class')
-    num_masks_per_class = np.bincount(annotation_labels, minlength=num_classes)
-    for c in range(num_classes):
+    num_masks_per_class = np.bincount(annotation_labels, minlength=args.num_classes)
+    for c in range(args.num_classes):
         idx = annotation_labels==c
         total_time_this_class = sum(annotation_times[idx])
         num_masks_this_class = sum(idx)
