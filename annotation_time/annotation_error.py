@@ -3,21 +3,66 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def print_classification_report(conf_mat, names):
-    tp = np.diag(conf_mat)
-    fp = conf_mat.sum(axis=0) - tp
-    fn = conf_mat.sum(axis=1) - tp
-    precision = tp / (tp + fp)
-    recall = tp / (tp + fn)
-    f1 = 2 * precision * recall / (precision + recall)
-    accuracy = tp.sum() / conf_mat.sum()
-    support = conf_mat.sum(axis=1).astype(int)
-    num_classes = len(conf_mat)
-    for c in range(num_classes):
-        print('{}\t{}\t{:.2f}\t{:.2f}\t{:.2f}\t{}'.format(c, names[c], precision[c], recall[c], f1[c], support[c]))
-    print('accuracy {:.2f}'.format(accuracy))
-    print('average precision {:.2f}, recall {:.2f} , f1 {:.2f}'.format(precision.mean(), recall.mean(), f1.mean()))
+class ClassificationReport:
+    def __init__(self, conf_mat, names):
+        self.names = names
+        tp = np.diag(conf_mat)
+        fp = conf_mat.sum(axis=0) - tp
+        fn = conf_mat.sum(axis=1) - tp
+        self.precision = tp / (tp + fp)
+        self.recall = tp / (tp + fn)
+        self.f1 = 2 * self.precision * self.recall / (self.precision + self.recall)
+        self.accuracy = tp.sum() / conf_mat.sum()
+        self.support = conf_mat.sum(axis=1).astype(int)
+        self.num_classes = len(conf_mat)
 
+    def __str__(self):
+        res = ''
+        max_name_length = max([len(name) for name in self.names])
+        for c in range(self.num_classes):
+            name = self.names[c] + (max_name_length - len(self.names[c]))*' '
+            res +='{}\t{}\t{:.2f}\t{:.2f}\t{:.2f}\t{}\n'.\
+                format(c, name, self.precision[c], self.recall[c], self.f1[c], self.support[c])
+        res += 'accuracy {:.2f}\n'.format(self.accuracy)
+        res += 'average precision {:.2f} +/-{:.3f}, recall {:.2f} +/-{:.3f}, f1 {:.2f} +/-{:.3f}\n'.\
+            format(self.precision.mean(), self.precision.std(), self.recall.mean(), self.recall.std(), self.f1.mean(), self.f1.std())
+        res += 'min precision {:.2f}, min recall {:.2f}, min f1 {:.2f}'. \
+            format(self.precision.min(), self.recall.min(), self.f1.min())
+        return res
+
+
+    def plot_precision_recall(self):
+        bar_width = 0.4
+        fig = plt.subplots(figsize =(12, 4))
+        br1 = np.arange(self.num_classes)
+        br2 = np.array([x + bar_width for x in br1])
+
+        plt.bar(br1, self.precision, color ='blue', width = bar_width,
+                edgecolor ='grey', label ='precision')
+        plt.bar(br2, self.recall, color ='cyan', width = bar_width,
+                edgecolor ='grey', label ='recall')
+        plt.xlim([br1[0]-bar_width, br2[-1]+8*bar_width])
+        plt.ylim([0.5, 1.0])
+        plt.xticks([r + bar_width/2 for r in range(self.num_classes)], self.names, rotation=90)
+        plt.subplots_adjust(left=0.09, right=0.98, bottom=0.25, top=0.96)
+        plt.legend()
+
+        plt.show(block=False)
+
+
+def plot_cm(cm, num_classes, dict_classes):
+    cm_normalized = cm / cm.sum(1).clip(min=1e-12)[:, None]
+
+    plt.figure(figsize=(10,8))
+    plt.imshow(cm_normalized)
+    plt.xlabel('Ground truth',fontsize=16)
+    plt.ylabel('Prediction', fontsize=16)
+    #plt.title('normalized confusion matrix')
+    plt.yticks(range(num_classes), [dict_classes[i] for i in range(num_classes)])
+    plt.xticks(range(num_classes), [dict_classes[i] for i in range(num_classes)], rotation=90)
+    plt.colorbar()
+    plt.subplots_adjust(left=0.09, right=0.98, bottom=0.15, top=0.96)
+    plt.show(block=False)
 
 
 dict_classes = {0: 'road', 1: 'sidewalk', 2: 'building', 3: 'wall', 4: 'fence', 5: 'pole',
@@ -36,20 +81,13 @@ for fname_all_masks in ['all_masks_cityscapes_train.pkl', 'all_masks_mapillary_v
         col_cm = mask['confusion_matrix']
         cm[:, label] += col_cm
 
-    cm_normalized = cm / cm.sum(1).clip(min=1e-12)[:, None]
+    # plot_cm(cm, num_classes, dict_classes)
 
-    plt.figure(figsize=(10,8))
-    plt.imshow(cm_normalized)
-    plt.xlabel('Ground truth',fontsize=16)
-    plt.ylabel('Prediction', fontsize=16)
-    #plt.title('normalized confusion matrix')
-    plt.yticks(range(num_classes), [dict_classes[i] for i in range(num_classes)])
-    plt.xticks(range(num_classes), [dict_classes[i] for i in range(num_classes)], rotation=90)
-    plt.colorbar()
-    plt.subplots_adjust(left=0.09, right=0.98, bottom=0.15, top=0.96)
-    plt.show(block=False)
+    cr = ClassificationReport(cm, [dict_classes[c] for c in range(num_classes)])
+    print(cr)
+    # cr.plot_precision_recall()
 
-    print_classification_report(cm, [dict_classes[c] for c in range(num_classes)])
+
 
 
 """
@@ -74,9 +112,9 @@ Cityscapes
 16      train           0.99    0.99    0.99    27527178
 17      motorcycle      0.96    0.95    0.96    8161237
 18      bicycle         0.97    0.95    0.96    30631021
-
 accuracy 0.98
-average precision 0.96, recall 0.93 , f1 0.95
+average precision 0.96 +/-0.031, recall 0.93 +/-0.072, f1 0.95 +/-0.052
+min precision 0.89, min recall 0.75, min f1 0.81
 
 Mapillary
 
@@ -99,8 +137,9 @@ Mapillary
 16      train           0.98    0.99    0.98    13892923
 17      motorcycle      0.97    0.97    0.97    26560031
 18      bicycle         0.97    0.96    0.97    29283735
-
 accuracy 0.98
-average precision 0.96, recall 0.96 , f1 0.96
+average precision 0.96 +/-0.030, recall 0.96 +/-0.043, f1 0.96 +/-0.036
+min precision 0.88, min recall 0.83, min f1 0.87
 
 """
+
