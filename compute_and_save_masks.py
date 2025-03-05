@@ -4,6 +4,7 @@ from segment_anything import SamAutomaticMaskGenerator, sam_model_registry
 import cv2
 import argparse
 import numpy as np
+from skimage.io import imread
 
 """
 python -i compute_and_save_masks.py \
@@ -26,6 +27,33 @@ python -i compute_and_save_masks.py \
   --dataset mapillary_vistas_aspect_1.33 \
   --vit-model vit_h \
   --path-out masks_0.86_0.92_400/Mapillary_Vistas_aspect_1.33/training  
+
+ls ./data/acdc/rgb_anon_trainvaltest/rgb_anon/fog/*/*/*.png -c1 > acdc_fog_train_val_test.txt
+ls ./data/acdc/rgb_anon_trainvaltest/rgb_anon/night/*/*/*.png -c1 > acdc_night_train_val_test.txt
+ls ./data/acdc/rgb_anon_trainvaltest/rgb_anon/rain/*/*/*.png -c1 > acdc_rain_train_val_test.txt
+ls ./data/acdc/rgb_anon_trainvaltest/rgb_anon/snow/*/*/*.png -c1 > acdc_snow_train_val_test.txt
+  
+ls ./data/acdc/rgb_anon_trainvaltest/rgb_anon/*/*/*/*.png -c1 > acdc_train_val_test.txt
+
+python -i compute_and_save_masks.py \
+  --gpu 0 \
+  --filename acdc_train_val_test1.txt \
+  --dataset acdc \
+  --vit-model vit_h \
+  --path-out masks_0.86_0.92_400/acdc
+  
+  
+python -i compute_and_save_masks.py \
+  --gpu 0 \
+  --filename easyportrait_train_1.txt \
+  --dataset easyportrait \
+  --downsample 2 \
+  --vit-model vit_b \
+  --pred-iou-thresh 1e-3 \
+  --stability-score-thresh 1e-3 \
+  --min-mask-region-area 50 \
+  --path-out masks_1e-3_1e-3_50/easyportrait  
+
 """
 
 def parse_args():
@@ -37,6 +65,8 @@ def parse_args():
     parser.add_argument('--dataset', required=True,
                         help='either cityscapes of mapillary, this is to decide the format of the masks filenames '
                         'and if to resize the image')
+    parser.add_argument('--downsample', type=int, required=False, default=1,
+                        help='downsampling step of input images.')
     parser.add_argument('--vit-model', required=True,
                         help='either vit_h, vit_l, vit_b from larger to smaller in nummber of parameters.')
     parser.add_argument('--pred-iou-thresh', type=float, default=0.86,
@@ -55,7 +85,7 @@ if __name__ == '__main__':
     args = parse_args()
     print(args)
     assert os.path.exists(args.filename)
-    assert args.dataset in ['cityscapes', 'mapillary_vistas_aspect_1.33']
+    assert args.dataset in ['cityscapes', 'mapillary_vistas_aspect_1.33', 'acdc', 'easyportrait']
     assert args.vit_model in ['vit_h', 'vit_l', 'vit_b']
     # because we will run this in parallel, one process per gpu
     # assert not os.path.isdir(args.path_out)
@@ -92,7 +122,13 @@ if __name__ == '__main__':
         fnames = f.read().splitlines()
 
     for fn in tqdm(fnames):
+        if args.dataset == 'easyportrait':
+            fn = '/home/joans/109/datasets/easyportrait/images/train/' + fn
+
         image = cv2.cvtColor(cv2.imread(fn), cv2.COLOR_BGR2RGB)
+        if args.downsample > 1:
+            image = image[::args.downsample, ::args.downsample, :]
+
         if args.dataset == 'cityscapes':
             fname_mask = fn.split('/')[-1].replace('leftImg8bit', 'masks').replace('.png', '.npz')
             # to be read like
@@ -101,12 +137,39 @@ if __name__ == '__main__':
         elif args.dataset == 'mapillary':
             image = cv2.resize(image, (1632, 1216))
             fname_mask = fn.split('/')[-1].replace('.jpg', '.npz')
+        elif args.dataset == 'acdc':
+            image = cv2.resize(image, (1920, 1080))
+            condition, split, sequence, fname_image = fn.split('/')[-4:]
+            fname_mask = fname_image.replace('.png', '.npz')
+        elif args.dataset == 'easyportrait':
+            _, _, split, fname_image = fn.split('/')[-4:]
+            fname_mask = fname_image.replace('.jpg', '.npz')
         else:
             assert False
 
         masks = mask_generator.generate(image)
-        print(fn, len(masks))
-        np.savez_compressed(os.path.join(args.path_out, fname_mask), masks=masks)
+        # print(fn, len(masks))
+        if args.dataset in ['cityscapes', 'mapillary']:
+            fname_out = os.path.join(args.path_out, fname_mask)
+        elif args.dataset == 'acdc':
+            dir_output_name = os.path.join(args.path_out, condition, split, sequence)
+            if not os.path.isdir(dir_output_name):
+              os.makedirs(dir_output_name)
+              print('made output dir ' + dir_output_name)
+
+            fname_out = os.path.join(dir_output_name, fname_mask)
+        elif args.dataset == 'easyportrait':
+            dir_output_name = os.path.join(args.path_out, split)
+            if not os.path.isdir(dir_output_name):
+              os.makedirs(dir_output_name)
+              print('made output dir ' + dir_output_name)
+
+            fname_out = os.path.join(dir_output_name, fname_mask)
+        else:
+            assert False
+
+        assert not os.path.isfile(fname_out), fname_out + ' already exists'
+        np.savez_compressed(fname_out, masks=masks)
         # break
 
 
